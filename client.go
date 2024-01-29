@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq/internal/base"
 	"github.com/hibiken/asynq/internal/errors"
 	"github.com/hibiken/asynq/internal/rdb"
+	"github.com/redis/go-redis/v9"
 )
 
 // A Client is responsible for scheduling tasks.
@@ -43,6 +43,7 @@ const (
 	QueueOpt
 	TimeoutOpt
 	DeadlineOpt
+	UniqueKeyOpt
 	UniqueOpt
 	ProcessAtOpt
 	ProcessInOpt
@@ -70,6 +71,7 @@ type (
 	taskIDOption    string
 	timeoutOption   time.Duration
 	deadlineOption  time.Time
+	uniqueKeyOption string
 	uniqueOption    time.Duration
 	processAtOption time.Time
 	processInOption time.Duration
@@ -150,9 +152,9 @@ func (t deadlineOption) Value() interface{} { return time.Time(t) }
 // TTL duration must be greater than or equal to 1 second.
 //
 // Uniqueness of a task is based on the following properties:
-//     - Task Type
-//     - Task Payload
-//     - Queue Name
+//   - Task Type
+//   - Task Payload
+//   - Queue Name
 func Unique(ttl time.Duration) Option {
 	return uniqueOption(ttl)
 }
@@ -160,6 +162,17 @@ func Unique(ttl time.Duration) Option {
 func (ttl uniqueOption) String() string     { return fmt.Sprintf("Unique(%v)", time.Duration(ttl)) }
 func (ttl uniqueOption) Type() OptionType   { return UniqueOpt }
 func (ttl uniqueOption) Value() interface{} { return time.Duration(ttl) }
+
+// UniqueKey returns an option that sets the uniqueness key of a task. This
+// allows the caller to define the uniqueness rather than relying on the
+// payload. The task type and queue name is still used for the uniqueness.
+func UniqueKey(key string) Option {
+	return uniqueKeyOption(key)
+}
+
+func (key uniqueKeyOption) String() string     { return fmt.Sprintf("UniqueKey(%s)", string(key)) }
+func (key uniqueKeyOption) Type() OptionType   { return UniqueKeyOpt }
+func (key uniqueKeyOption) Value() interface{} { return key }
 
 // ProcessAt returns an option to specify when to process the given task.
 //
@@ -222,6 +235,7 @@ type option struct {
 	taskID    string
 	timeout   time.Duration
 	deadline  time.Time
+	uniqueKey string
 	uniqueTTL time.Duration
 	processAt time.Time
 	retention time.Duration
@@ -261,6 +275,8 @@ func composeOptions(opts ...Option) (option, error) {
 			res.timeout = time.Duration(opt)
 		case deadlineOption:
 			res.deadline = time.Time(opt)
+		case uniqueKeyOption:
+			res.uniqueKey = string(opt)
 		case uniqueOption:
 			ttl := time.Duration(opt)
 			if ttl < 1*time.Second {
@@ -365,7 +381,11 @@ func (c *Client) EnqueueContext(ctx context.Context, task *Task, opts ...Option)
 	}
 	var uniqueKey string
 	if opt.uniqueTTL > 0 {
-		uniqueKey = base.UniqueKey(opt.queue, task.Type(), task.Payload())
+		payload := task.Payload()
+		if opt.uniqueKey != "" {
+			payload = []byte(opt.uniqueKey)
+		}
+		uniqueKey = base.UniqueKey(opt.queue, task.Type(), payload)
 	}
 	msg := &base.TaskMessage{
 		ID:        opt.taskID,
