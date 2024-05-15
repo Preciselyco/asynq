@@ -1217,7 +1217,7 @@ redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
 return redis.status_reply("OK")
 `)
 
-// ReclaimStateAggregationSets checks for any stale aggregation sets in the given queue, and
+// ReclaimStaleAggregationSets checks for any stale aggregation sets in the given queue, and
 // reclaim tasks in the stale aggregation set by putting them back in the group.
 func (r *RDB) ReclaimStaleAggregationSets(qname string) error {
 	var op errors.Op = "RDB.ReclaimStaleAggregationSets"
@@ -1241,9 +1241,7 @@ return table.getn(ids)`)
 
 // DeleteExpiredCompletedTasks checks for any expired tasks in the given queue's completed set,
 // and delete all expired tasks.
-func (r *RDB) DeleteExpiredCompletedTasks(qname string) error {
-	// Note: Do this operation in fix batches to prevent long running script.
-	const batchSize = 100
+func (r *RDB) DeleteExpiredCompletedTasks(qname string, batchSize int) error {
 	for {
 		n, err := r.deleteExpiredCompletedTasks(qname, batchSize)
 		if err != nil {
