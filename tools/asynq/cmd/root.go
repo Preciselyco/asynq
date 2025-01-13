@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -39,6 +40,7 @@ var (
 	useRedisCluster bool
 	clusterAddrs    string
 	tlsServerName   string
+	insecure        bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -313,6 +315,8 @@ func init() {
 		"List of comma-separated redis server addresses")
 	rootCmd.PersistentFlags().StringVar(&tlsServerName, "tls_server",
 		"", "Server name for TLS validation")
+	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure",
+		false, "Allow insecure TLS connection by skipping cert validation")
 	// Bind flags with config.
 	viper.BindPFlag("uri", rootCmd.PersistentFlags().Lookup("uri"))
 	viper.BindPFlag("db", rootCmd.PersistentFlags().Lookup("db"))
@@ -320,6 +324,7 @@ func init() {
 	viper.BindPFlag("cluster", rootCmd.PersistentFlags().Lookup("cluster"))
 	viper.BindPFlag("cluster_addrs", rootCmd.PersistentFlags().Lookup("cluster_addrs"))
 	viper.BindPFlag("tls_server", rootCmd.PersistentFlags().Lookup("tls_server"))
+	viper.BindPFlag("insecure", rootCmd.PersistentFlags().Lookup("insecure"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -369,6 +374,11 @@ func createRDB() *rdb.RDB {
 	return rdb.NewRDB(c)
 }
 
+// createClient creates a Client instance using flag values and returns it.
+func createClient() *asynq.Client {
+	return asynq.NewClient(getRedisConnOpt())
+}
+
 // createInspector creates a Inspector instance using flag values and returns it.
 func createInspector() *asynq.Inspector {
 	return asynq.NewInspector(getRedisConnOpt())
@@ -396,7 +406,7 @@ func getTLSConfig() *tls.Config {
 	if tlsServer == "" {
 		return nil
 	}
-	return &tls.Config{ServerName: tlsServer}
+	return &tls.Config{ServerName: tlsServer, InsecureSkipVerify: viper.GetBool("insecure")}
 }
 
 // printTable is a helper function to print data in table format.
@@ -455,4 +465,38 @@ func isPrintable(data []byte) bool {
 		}
 	}
 	return !isAllSpace
+}
+
+// Helper to turn a command line flag into a duration
+func getDuration(cmd *cobra.Command, arg string) time.Duration {
+	durationStr, err := cmd.Flags().GetString(arg)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+
+	return duration
+}
+
+// Helper to turn a command line flag into a time
+func getTime(cmd *cobra.Command, arg string) time.Time {
+	timeStr, err := cmd.Flags().GetString(arg)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+
+	timeVal, err := time.Parse(time.RFC3339, timeStr)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+
+	return timeVal
 }
